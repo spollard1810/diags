@@ -30,9 +30,12 @@ def detect_device_type(ip, username, password):
     }
     try:
         guesser = SSHDetect(**params)
-        return guesser.autodetect() or "cisco_ios"
+        dt = guesser.autodetect() or "cisco_ios"
     except:
-        return "cisco_ios"
+        dt = "cisco_ios"
+    if "xe" in dt:
+        dt = "cisco_ios"
+    return dt
 
 def read_devices_csv(username, password):
     devices = []
@@ -59,24 +62,40 @@ def get_interface_details(device):
     return {entry["interface"]: entry for entry in parsed}
 
 def display_interface_stats(device, details):
+    counters = [
+        ("input_rate", "Input Rate"),
+        ("output_rate", "Output Rate"),
+        ("input_pps", "Input PPS"),
+        ("output_pps", "Output PPS"),
+        ("input_packets", "Input Packets"),
+        ("output_packets", "Output Packets"),
+        ("input_errors", "Input Errors"),
+        ("output_errors", "Output Errors"),
+        ("crc", "CRC Errors"),
+        ("frame", "Frame Errors"),
+        ("overrun", "Overruns"),
+    ]
     table = Table(title=f"{device.ip}", expand=True)
     table.add_column("Interface", no_wrap=True)
     table.add_column("Status", justify="center")
+    for _, header in counters:
+        table.add_column(header, justify="right")
     table.add_column("Issues")
 
     for name, stats in details.items():
         status = f"{stats['link_status']}/{stats['protocol_status']}"
+        row = [name, status]
         issues = []
+        for key, _ in counters:
+            val = stats.get(key) or "0"
+            row.append(val)
+            if key in ("input_errors", "output_errors", "crc", "frame", "overrun") and val.isdigit() and int(val) > 0:
+                issues.append(f"{key}={val}")
         if stats["link_status"] != "up" or stats["protocol_status"] != "up":
-            issues.append(status)
-        for counter in ("input_errors", "output_errors", "crc", "frame", "overrun"):
-            val = stats.get(counter) or "0"
-            if val.isdigit() and int(val) > 0:
-                issues.append(f"{counter}={val}")
-        if issues:
-            table.add_row(name, status, ", ".join(issues), style="issue")
-        else:
-            table.add_row(name, status, "all clear", style="ok")
+            issues.insert(0, status)
+        row.append(", ".join(issues) or "all clear")
+        style = "issue" if issues else "ok"
+        table.add_row(*row, style=style)
 
     console.print(Panel(table, title=f"[bold]{device.ip} Interfaces[/bold]"))
 
